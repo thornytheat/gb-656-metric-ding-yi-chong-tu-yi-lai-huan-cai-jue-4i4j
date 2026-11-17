@@ -1,8 +1,8 @@
 # 深度登记 metricgraph
 
-- 规模：中型（7 个功能模块，76 个文件，65 条测试）
+- 规模：中型（8 个功能模块，99 个文件，107 条测试）
 - 核心规则：同名同版本指标先做表达式稳定签名，再按依赖图检测环并裁决生效版本。
-- 使用者与工作流：分析治理组在指标发布前复核定义冲突、缺依赖、依赖环与版本重叠。
+- 使用者与工作流：分析治理组在指标发布前复核定义冲突、缺依赖、依赖环与版本重叠；误采信时通过备份恢复单退回基线，后续批次保全为只读凭据。
 
 ## 功能模块
 
@@ -15,6 +15,7 @@
 | M5 影响面 | 看受影响的下游节点、环、断链、单边登记 | GET /api/impact | `app/modules/m5_impact/handler.py` `app/modules/m5_impact/service.py` `app/modules/m5_impact/closure.py` `app/modules/m5_impact/cycle.py` `app/modules/m5_impact/broken.py` | `tests/test_m5_impact.py` |
 | M6 版本批次 | 跑批次、看历史、验陈旧拒绝与区间重叠 | POST /api/runs | `app/modules/m6_batches/handler.py` `app/modules/m6_batches/service.py` `app/modules/m6_batches/window.py` `app/modules/m6_batches/guard.py` `app/modules/m6_batches/history.py` | `tests/test_m6_batches.py` |
 | M7 指标目录 | 导出一份定义、依赖与状态清单 | GET /api/export/catalog.csv | `app/modules/m7_migration/handler.py` `app/modules/m7_migration/service.py` `app/modules/m7_migration/csv_out.py` `app/modules/m7_migration/ledger.py` | `tests/test_m7_migration.py` |
+| M8 备份恢复 | 制作备份、预演差异、可续跑恢复、回看只读保全批次 | POST /api/recovery/backups | `app/modules/m8_recovery/handler.py` `app/modules/m8_recovery/service.py` `app/modules/m8_recovery/backup.py` `app/modules/m8_recovery/restore.py` `app/modules/m8_recovery/checksum.py` `app/modules/m8_recovery/preview.py` `app/modules/m8_recovery/guard.py` | `tests/test_m8_recovery.py` |
 
 ## 陷阱登记
 
@@ -30,6 +31,11 @@
 | TRAP-22 | 同一字段被连续改过两次名 | 只认最近一跳，最早的名字解析不到 | 跨版本改名链一路解析到底 | `app/modules/m4_mapping/rename.py` | `tests/test_m4_mapping.py::test_trap22_alias_chain_resolves_multi_hop` |
 | TRAP-25 | 两个版本生效区间重叠 | 取到哪版看运气 | 半开区间比较，重叠直接标记警告 | `app/modules/m6_batches/window.py` | `tests/test_m6_batches.py::test_trap25_overlap_flagged_but_adjacent_clean` |
 | TRAP-26 | 基于旧版本号提交 | 后提交无条件覆盖新结果 | 版本号乐观锁，基线落后即 409 | `app/modules/m6_batches/guard.py` | `tests/test_m6_batches.py::test_trap26_stale_submission_rejected` |
+| TRAP-27 | 整库覆盖恢复，备份后签发的批次记录丢失 | 恢复即删数据，已签发批次无法按原编号核对 | 恢复前把后续批次写入 preserved_* 只读凭据，业务表切回基线，凭据可回看 | `app/modules/m8_recovery/restore.py` | `tests/test_m8_recovery.py::test_restore_switches_baseline_and_preserves_batches` |
+| TRAP-28 | 恢复后新批次复用了保全批次的旧编号 | 同一 version_seq 指向两批数据，对账错乱 | 批次号高水位只增不减，next_version_seq 取表内最大值与高水位的较大者 +1 | `app/store.py` | `tests/test_m8_recovery.py::test_new_batch_never_reuses_preserved_seq` |
+| TRAP-29 | 备份字节被篡改仍被用于恢复 | 污染随备份回灌，恢复失去意义 | 整体 SHA-256 加三表表级校验和，任一不符即 400 拒绝 | `app/modules/m8_recovery/checksum.py` | `tests/test_m8_recovery.py::test_corrupt_backup_payload_sha_rejected` |
+| TRAP-30 | 恢复进程在整表替换中途崩溃 | 库停在半替换状态，重试要么重复要么漏步 | 五步独立事务逐步落盘 steps_done，续跑跳过已完成步，重试不重复恢复 | `app/modules/m8_recovery/restore.py` | `tests/test_m8_recovery.py::test_interrupted_restore_resumes_without_repeating` |
+| TRAP-31 | 恢复与跑批并发，旧基线结果覆盖切换后的库 | 基线被悄悄写回 | 未完成恢复单期间跑批一律 409，建恢复单也互斥 | `app/modules/m8_recovery/guard.py` | `tests/test_m8_recovery.py::test_batch_rejected_while_restore_in_progress` |
 
 ## 对账规则
 

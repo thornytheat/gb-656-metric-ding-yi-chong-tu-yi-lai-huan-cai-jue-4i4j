@@ -13,6 +13,7 @@ from app.modules.m4_mapping import service as mapping
 from app.modules.m5_impact import service as impact
 from app.modules.m6_batches import guard, history, window as window_mod
 from app.modules.m7_migration import service as migration
+from app.modules.m8_recovery import service as recovery_service
 
 
 def _ref_counts(consumers: list[dict]) -> dict:
@@ -84,8 +85,8 @@ def execute(old_file: str = config.DEFAULT_OLD, new_file: str = config.DEFAULT_N
     key = manifest_mod.batch_key(digests, {"window": window_key, **params},
                                  config.RULESET_VERSION)
 
-    # 陈旧提交先拒：基线落后时，连复用都不该给
-    guard.check_stale(base_version_seq, store.current_version_seq())
+    # 陈旧提交先拒：基线落后时，连复用都不该给；恢复进行中同样拒，避免与整表替换交叉
+    recovery_service.assert_batch_allowed(base_version_seq)
 
     existing = store.find_run_by_key(key)
     if existing is not None:

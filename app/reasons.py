@@ -49,6 +49,11 @@ CODES: dict[str, tuple[str, str]] = {
     "VERSION_APPLIED": ("版本已登记", "info"),
     "RUN_REUSED": ("同一输入命中已算批次", "info"),
     "WINDOW_INVERTED": ("生效区间起点不早于终点", "break"),
+    # M8 备份恢复
+    "BACKUP_CORRUPT": ("备份损坏拒绝使用", "break"),
+    "RESTORE_IN_PROGRESS": ("恢复进行中跑批暂停", "break"),
+    "RESTORE_CONFLICT": ("恢复单并发冲突", "break"),
+    "BATCH_PRESERVED": ("后续批次保全为只读凭据", "info"),
     # 结论
     "COMPATIBLE": ("兼容", "info"),
     "COMPATIBLE_BY_MAPPING": ("加别名后兼容", "warn"),

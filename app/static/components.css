@@ -12,6 +12,10 @@
 
 .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
+.flash { font-size: 12px; color: var(--ink-muted); min-height: 1em; }
+.flash.is-ok { color: var(--ok); }
+.flash.is-bad { color: var(--bad); }
+
 .field-inline { display: inline-flex; align-items: center; gap: 6px; }
 .field-label { color: var(--ink-muted); font-size: 12px; }
 

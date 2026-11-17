@@ -14,6 +14,7 @@ PAGES = [
     ("/impact", "影响面"),
     ("/batches", "版本历史"),
     ("/spec", "迁移单"),
+    ("/recovery", "备份恢复单"),
 ]
 
 
@@ -69,3 +70,30 @@ def test_home_renders_field_rows(client):
     assert "order_code" in home.text
     assert "pay_channel" in home.text
     assert "破坏" in home.text
+
+
+def test_recovery_backup_and_restore_flow(client):
+    # 制作备份 → 追加批次 → 恢复切回 → 编号不复用，页面与接口全程可用
+    backup = client.post("/api/recovery/backups", json={"note": "e2e"}).json()
+    assert backup["run_count"] == 1
+    client.post("/api/runs", json={"params": {"wave": "e2e-pollute"}})
+    assert client.get("/api/batches").json()["current_version_seq"] == 2
+
+    preview = client.get(f"/api/recovery/preview/{backup['backup_id']}").json()
+    assert preview["runs"]["preserve_count"] == 1
+
+    job = client.post("/api/recovery/restore",
+                      json={"backup_id": backup["backup_id"]}).json()
+    assert job["status"] == "finished" and job["preserved_count"] == 1
+    assert client.get("/api/batches").json()["current_version_seq"] == 1
+    assert client.get("/api/recovery/preserved").json()["count"] == 1
+
+    fresh = client.post("/api/runs", json={"params": {"wave": "e2e-after"}}).json()
+    assert fresh["version_seq"] == 3
+    health = client.get("/api/health").json()
+    assert health["baseline"]["backup_id"] == backup["backup_id"]
+    assert health["seq_hwm"] == 2
+
+    page = client.get("/recovery")
+    assert page.status_code == 200
+    assert "/static/recovery.js" in page.text

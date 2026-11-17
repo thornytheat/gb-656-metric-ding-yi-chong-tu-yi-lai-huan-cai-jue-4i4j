@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}备份恢复 · metricgraph{% endblock %}
+{% block body %}
+<section class="doc-section">
+  <h1>备份恢复单</h1>
+  <p class="lede">
+    当前序号 <span class="mono">{{ current_seq }}</span>
+    高水位 <span class="mono">{{ seq_hwm }}</span>
+    备份 <span class="mono">{{ backups|length }}</span>
+    恢复单 <span class="mono">{{ jobs|length }}</span>
+  </p>
+  <div class="actions">
+    <button type="button" data-action="backup">制作备份</button>
+    <a class="btn ghost" href="/api/recovery/backups">备份 JSON</a>
+    <a class="btn ghost" href="/api/recovery/jobs">恢复单 JSON</a>
+    <a class="btn ghost" href="/api/recovery/preserved">保全凭据 JSON</a>
+    <span class="flash" data-flash></span>
+  </div>
+
+  {% if baseline %}
+  <p class="notice">
+    已切回备份基线 <span class="mono">{{ baseline.backup_id }}</span>
+    （恢复单 <span class="mono">{{ baseline.job_id }}</span>，
+    切换于 {{ baseline.switched_at|ts }}，基线序号 <span class="mono">{{ baseline.baseline_seq }}</span>，
+    高水位 <span class="mono">{{ baseline.seq_hwm }}</span>）。后续批次号从高水位继续，不复用旧编号。
+  </p>
+  {% else %}
+  <p class="notice">尚未执行过恢复，当前分析库即工作基线。</p>
+  {% endif %}
+</section>
+
+<section class="doc-section">
+  <h2><span class="clause">1</span>备份单</h2>
+  {% if backups %}
+  <div class="wrap-scroll">
+    <table>
+      <caption>备份记录<sup class="fn">1</sup></caption>
+      <thead>
+        <tr>
+          <th>备份号</th><th class="num">批次</th><th class="num">快照</th>
+          <th class="num">隔离行</th><th class="num">最大序号</th><th>摘要</th><th>制作</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in backups %}
+        <tr>
+          <td class="name">{{ item.backup_id }}</td>
+          <td class="num">{{ item.run_count }}</td>
+          <td class="num">{{ item.snapshot_count }}</td>
+          <td class="num">{{ item.quarantine_count }}</td>
+          <td class="num">{{ item.seq_max }}</td>
+          <td class="name mono" title="{{ item.payload_sha256 }}">{{ item.payload_sha256[:10] }}…</td>
+          <td class="name">{{ item.created_at|day }}</td>
+          <td class="actions">
+            <button type="button" class="btn-sm ghost btn" data-action="preview" data-backup="{{ item.backup_id }}">预演</button>
+            <button type="button" class="btn-sm btn" data-action="restore" data-backup="{{ item.backup_id }}">恢复</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">还没有备份，先制作一份。</p>
+  {% endif %}
+</section>
+
+<section class="doc-section">
+  <h2><span class="clause">2</span>预演差异</h2>
+  <div id="preview-panel" hidden>
+    <dl class="manifest" id="preview-body"></dl>
+    <div class="wrap-scroll">
+      <table id="preview-table">
+        <thead><tr><th>类别</th><th>批次</th><th class="num">序号</th><th>版本</th><th>生成</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+  <p class="empty" id="preview-empty">选一条备份点「预演」，先看保全与还原清单，不落库。</p>
+</section>
+
+<section class="doc-section">
+  <h2><span class="clause">3</span>恢复单</h2>
+  {% if jobs %}
+  <div class="wrap-scroll">
+    <table>
+      <caption>可续跑恢复单<sup class="fn">2</sup></caption>
+      <thead>
+        <tr>
+          <th>恢复单</th><th>备份</th><th>状态</th><th class="num">进度</th>
+          <th class="num">保全批次</th><th>更新</th><th>末条错误</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for job in jobs %}
+        <tr>
+          <td class="name">{{ job.job_id }}</td>
+          <td class="name">{{ job.backup_id }}</td>
+          <td>
+            {% if job.status == 'finished' %}<span class="st st-ok">已完成</span>
+            {% elif job.status == 'interrupted' %}<span class="st st-bad">中断</span>
+            {% else %}<span class="st st-warn">进行中</span>{% endif %}
+          </td>
+          <td class="num">{{ job.steps_done }}/{{ job.steps_total }}</td>
+          <td class="num">{{ job.preserved_count }}</td>
+          <td class="name">{{ job.updated_at|day }}</td>
+          <td class="name">{{ job.last_error or '—' }}</td>
+          <td>
+            {% if job.status != 'finished' %}
+            <button type="button" class="btn-sm btn" data-action="resume" data-job="{{ job.job_id }}">续跑</button>
+            {% else %}<span class="badge badge-ok">只读</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">还没有恢复单。</p>
+  {% endif %}
+  <ol class="rollback">
+    {% for step in steps %}
+    <li><span class="mono">{{ loop.index }}. {{ step }}</span></li>
+    {% endfor %}
+  </ol>
+</section>
+
+<section class="doc-section">
+  <h2><span class="clause">4</span>保全批次（只读凭据）</h2>
+  {% if preserved %}
+  <div class="wrap-scroll">
+    <table>
+      <caption>恢复后被切出、但编号与内容完整保留的批次<sup class="fn">3</sup></caption>
+      <thead>
+        <tr><th>恢复单</th><th>批次</th><th class="num">序号</th><th>版本</th><th>保全时间</th><th>凭据</th></tr>
+      </thead>
+      <tbody>
+        {% for item in preserved %}
+        <tr>
+          <td class="name">{{ item.job_id }}</td>
+          <td class="name">{{ item.run_id }}</td>
+          <td class="num">{{ item.version_seq }}</td>
+          <td class="name">{{ item.summary.version_label_old }} → {{ item.summary.version_label_new }}</td>
+          <td class="name">{{ item.preserved_at|day }}</td>
+          <td><a class="btn btn-sm ghost" href="/api/recovery/preserved/{{ item.job_id }}/{{ item.run_id }}">回看 JSON</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">还没有保全批次。恢复时，备份之后签发的批次会保全在这里，业务库切回备份基线。</p>
+  {% endif %}
+</section>
+
+<aside class="notes">
+  <ol class="footnotes">
+    <li>备份载荷带整体与表级 SHA-256，校验不符的损坏备份拒绝使用。<a class="back" href="#main">↩</a></li>
+    <li>恢复分步落盘，中断后续跑只补未完成步，重试不重复恢复。<a class="back" href="#main">↩</a></li>
+    <li>保全批次只读回看，编号进入高水位，新批次永不复用这些序号。<a class="back" href="#main">↩</a></li>
+  </ol>
+</aside>
+{% endblock %}
+{% block scripts %}
+<script src="/static/recovery.js"></script>
+{% endblock %}
